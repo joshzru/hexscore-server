@@ -1,0 +1,36 @@
+{
+  "name": "hexscore-server",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/joshzru/hexscore-server#readme",
+  "bugs": {
+    "url": "https://github.com/joshzru/hexscore-server/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joshzru/hexscore-server.git"
+  },
+  "license": "GPL-3.0-only",
+  "author": "joshzru",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@tsconfig/node26": "^26.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "nodemon": "^3.1.14",
+    "prettier": "^3.9.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.4"
+  }
+}
