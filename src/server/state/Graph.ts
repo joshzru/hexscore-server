@@ -177,4 +177,71 @@ export class Graph {
         node.type = undefined;
         node.player = undefined;
     }
+
+    findLongestRoad(player: Player): number {
+        let longest = 0;
+
+        for ( const nodeId of this.nodes.keys() ) {
+            const length = this.findLongestRoadFromNode(
+                nodeId,
+                player,
+                new Set<EdgeId>,
+            );
+
+            longest = Math.max(longest, length);
+        }
+
+        return longest;
+    }
+
+    private findLongestRoadFromNode(
+        nodeId: NodeId,
+        player: Player,
+        usedEdges: Set<EdgeId>,
+    ): number {
+        const node = this.nodes.get(nodeId);
+
+        if ( !node ) {
+            throw new Error(`Node ${nodeId} does not exist.`);
+        }
+
+        if (
+            node.player !== undefined &&
+            node.player !== player
+        ) {
+            return 0;
+        }
+
+        let longest = 0;
+
+        for ( const edge of this.getConnectedEdges(nodeId) ) {
+            if (
+                edge.road !== player ||
+                usedEdges.has(edge.id)
+            ) {
+                continue;
+            }
+            
+            usedEdges.add(edge.id);
+
+            const nextNodeId =
+                edge.from === nodeId
+                    ? edge.to
+                    : edge.from;
+            
+            const length =
+                1 +
+                this.findLongestRoadFromNode(
+                    nextNodeId,
+                    player,
+                    usedEdges,
+                );
+            
+            usedEdges.delete(edge.id);
+
+            longest = Math.max(longest, length);
+        }
+
+        return longest;
+    }
 }

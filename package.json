@@ -15,7 +15,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "dev": "nodemon dist/index.js"
   },
   "devDependencies": {
     "@tsconfig/node26": "^26.0.1",
