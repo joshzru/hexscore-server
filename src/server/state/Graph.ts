@@ -1,16 +1,16 @@
 import type { Player } from "./Hex.js";
 import type { Placement } from "./Hex.js";
 
-type NodeId = string;
+export type NodeId = string;
 type EdgeId = string;
 
-interface Node {
+export interface GraphNode {
     id: NodeId;
     player?: Player;
     type?: Placement;
 }
 
-export interface Edge {
+export interface GraphEdge {
     id: EdgeId;
     from: NodeId;
     to: NodeId;
@@ -18,13 +18,13 @@ export interface Edge {
 }
 
 export class Graph {
-    private nodes: Map<NodeId, Node> = new Map();
-    private edges: Map<EdgeId, Edge> = new Map();
+    private nodes: Map<NodeId, GraphNode> = new Map();
+    private edges: Map<EdgeId, GraphEdge> = new Map();
     private edgesByNode: Map<NodeId, Set<EdgeId>> = new Map();
 
     addNode(): NodeId {
         const id: NodeId = crypto.randomUUID();
-        const node: Node = {
+        const node: GraphNode = {
             id,
         };
 
@@ -32,6 +32,22 @@ export class Graph {
         this.edgesByNode.set(id, new Set());
 
         return id;
+    }
+
+    removeNode(nodeId: NodeId): void {
+        if ( !this.nodes.has(nodeId) ) {
+            throw new Error(`Node ${nodeId} does not exist`);
+        }
+
+        const edges = this.edgesByNode.get(nodeId);
+
+        if ( edges ) {
+            for ( const edge of [...edges] ) {
+                this.removeEdge(edge);
+            }
+        }
+
+        this.nodes.delete(nodeId);
     }
 
     addEdge(
@@ -46,7 +62,7 @@ export class Graph {
         }
 
         const id: EdgeId = crypto.randomUUID();
-        const edge: Edge = {
+        const edge: GraphEdge = {
             id,
             from,
             to,
@@ -59,7 +75,60 @@ export class Graph {
         return id;
     }
 
-    getConnectedEdges(nodeId: NodeId): Edge[] {
+    removeEdge(edgeId: EdgeId): void {
+        const edge = this.edges.get(edgeId);
+
+        if ( !edge ) {
+            throw new Error(`Edge ${edgeId} does not exist`);
+        }
+
+        for ( const nodeId of [edge.to, edge.from] ) {
+            const edges = this.edgesByNode.get(nodeId);
+
+            if ( !edges ) continue;
+
+            edges.delete(edgeId);
+        }
+    }
+
+    hasEdgeBetween(
+        first: NodeId,
+        second: NodeId,
+    ): boolean {
+        if (
+            !this.nodes.has(first) ||
+            !this.nodes.has(second)
+        ) {
+            return false;
+        }
+
+        const edges = this.edgesByNode.get(first);
+
+        if ( !edges ) return false;
+
+        for ( const edgeId of edges.values() ) {
+            const edge = this.edges.get(edgeId);
+
+            if ( !edge ) continue;
+
+            if (
+                (
+                    first === edge.to &&
+                    second === edge.from
+                ) ||
+                (
+                    second === edge.to &&
+                    first === edge.from
+                )
+            ){
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    getConnectedEdges(nodeId: NodeId): GraphEdge[] {
         const edgeIds = this.edgesByNode.get(nodeId);
 
         if ( !edgeIds ) {
@@ -71,7 +140,7 @@ export class Graph {
             .filter(Boolean);
     }
 
-    getNeighbors(nodeId: NodeId): Node[] {
+    getNeighbors(nodeId: NodeId): GraphNode[] {
         return this.getConnectedEdges(nodeId)
             .map(edge => {
                 const otherNodeId =
@@ -185,7 +254,7 @@ export class Graph {
             const length = this.findLongestRoadFromNode(
                 nodeId,
                 player,
-                new Set<EdgeId>,
+                new Set(),
             );
 
             longest = Math.max(longest, length);

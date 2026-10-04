@@ -1,3 +1,4 @@
+import type { NodeId } from './Graph.js';
 
 export type Player = 'red' | 'blue' | 'white' | 'yellow' | 'green' | 'brown';
 export type Placement = 'settlement' | 'city';
@@ -8,6 +9,8 @@ export type ResourceId =
     | 'wheat'
     | 'brick'
     | 'wood';
+
+export const NUM_HEX_DIRECTIONS = 6;
 
 // Axial coordinates
 export const HEX_DIRECTIONS: HexCoordinate[] = [
@@ -26,8 +29,9 @@ export interface HexCoordinate {
 
 export interface Hex {
     coordinate: HexCoordinate;
-    resource: ResourceId;
+    resource?: ResourceId;
     roll?: number;
+    vertices: NodeId[];
 }
 
 export function addCoordinates(
@@ -40,6 +44,11 @@ export function addCoordinates(
     }
 }
 
+/**
+ * 
+ * @param coordinate The coordinate to find neighbours for.
+ * @returns Each neighbour coordinate in clockwise cyclic order.
+ */
 export function getNeighborCoordinates(
     coordinate: HexCoordinate
 ): HexCoordinate[] {
