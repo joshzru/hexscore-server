@@ -15,8 +15,9 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
-    "dev": "nodemon dist/index.js"
+    "build": "tsc && shx mkdir -p dist/public && shx cp -r dist/server/. dist/. && shx cp -r dist/client/. dist/public/. && shx cp -r public/. dist/public/. && shx rm -rf dist/server && shx rm -rf dist/client",
+    "dev": "nodemon dist/index.js",
+    "start": "npm run build && npm run dev"
   },
   "devDependencies": {
     "@tsconfig/node26": "^26.0.1",
@@ -26,12 +27,14 @@
     "eslint-config-prettier": "^10.1.8",
     "nodemon": "^3.1.14",
     "prettier": "^3.9.9",
+    "shx": "^0.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
-    "socket.io": "^4.8.4"
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4"
   }
 }

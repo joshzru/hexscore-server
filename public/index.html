@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"
+    >
+    <link
+        rel="stylesheet"
+        href="/css/style.css"
+    >
+    <link
+        rel="shortcut icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+    <link
+        rel="icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+    <title>HexScore</title>
+</head>
+<body>
+    <main id="game">
+        <svg
+            id="board"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <g id="camera">
+                <g id="hexgrid">
+                    <g id="hexes"></g>
+                    <g id="edges"></g>
+                    <g id="nodes"></g>
+                </g>
+            </g>
+        </svg>
+
+        <div id="hex-context-menu" class="context-menu" hidden>
+            <button type="button" data-action="place-robber">
+                Place robber here
+            </button>
+            <button type="button" data-action="assign-roll">
+                Assign roll
+            </button>
+            <button type="button" data-action="assign-resource">
+                Assign resource
+            </button>
+            <button type="button" data-action="remove-hex">
+                Remove
+            </button>
+        </div>
+
+        <div id="node-context-menu" class="context-menu" hidden>
+            <button type="button" data-action="place-settlement">
+                Place settlement
+            </button>
+            <button type="button" data-action="place-city">
+                Place city
+            </button>
+            <button type="button" data-action="remove-placement">
+                Remove
+            </button>
+            <button type="button" data-action="change-player">
+                Change player
+            </button>
+        </div>
+
+        <div id="edge-context-menu" class="context-menu" hidden>
+            <button type="button" data-action="place-road">
+                Build road
+            </button>
+            <button type="button" data-action="remove-road">
+                Remove road
+            </button>
+            <button type="button" data-action="change-player">
+                Change player
+            </button>
+        </div>
+
+        <dialog id="selection-dialog">
+            <form id="selection-form" method="dialog">
+                <h2 id="selection-title"></h2>
+
+                <div id="selection-fields">
+                    <label for="player-choice" hidden>
+                        Choose a player:
+                        <select id="player-choice" name="player">
+                            <option value="red">Red</option>
+                            <option value="blue">Blue</option>
+                            <option value="white">White</option>
+                            <option value="yellow">Yellow</option>
+                            <option value="green">Green</option>
+                            <option value="brown">Brown</option>
+                        </select>
+                    </label>
+
+                    <label for="resource-choice" hidden>
+                        Choose a resource:
+                        <select id="resource-choice" name="resource">
+                            <option value="ore">Ore</option>
+                            <option value="sheep">Sheep</option>
+                            <option value="wheat">Wheat</option>
+                            <option value="wood">Wood</option>
+                            <option value="brick">Brick</option>
+                            <option value="desert">Desert</option>
+                        </select>
+                    </label>
+
+                    <label for="roll-input" hidden>d
+                        Enter a roll:
+                        <input
+                            type="number"
+                            id="roll-input"
+                            name="roll"
+                            min="2"
+                            max="12"
+                            value="7"
+                        >
+                    </label>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" value="cancel">
+                        Cancel
+                    </button>
+                    <button type="submit" value="confirm">
+                        Confirm
+                    </button>
+                </div>
+            </form>
+        </dialog>
+
+        <div class="scorebar-container">
+            <div id="scorebar" class="tray" hidden>
+                <div id="player-red" class="player-scorebar" hidden>
+                    <p class="player-name">Red:</p>
+                    <p class="player-score"></p>
+                </div>
+                <div id="player-blue" class="player-scorebar" hidden>
+                    <p class="player-name">Blue:</p>
+                    <p class="player-score"></p>
+                </div>
+                <div id="player-white" class="player-scorebar" hidden>
+                    <p class="player-name">White:</p>
+                    <p class="player-score"></p>
+                </div>
+                <div id="player-yellow" class="player-scorebar" hidden>
+                    <p class="player-name">Yellow:</p>
+                    <p class="player-score"></p>
+                </div>
+                <div id="player-green" class="player-scorebar" hidden>
+                    <p class="player-name">Green:</p>
+                    <p class="player-score"></p>
+                </div>
+                <div id="player-brown" class="player-scorebar" hidden>
+                    <p class="player-name">Brown:</p>
+                    <p class="player-score"></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="tray-container">
+            <div class="tray">
+                <button data-action="input-roll">Roll</button>
+                <button data-action="find-longest-road">Find longest road</button>
+                <button data-action="assign-longest-road">Assign longest road</button>
+                <button data-action="assign-largest-army">Assign largest army</button>
+            </div>            
+        </div>
+
+        <div id="notifications" class="notification-container"></div>
+    </main>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "socket.io-client":
+                "https://cdn.socket.io/4.8.3/socket.io.esm.min.js"
+        }
+    }
+    </script>
+    <script
+        type="module"
+        src="/client.js"
+    ></script>
+</body>
+</html>
