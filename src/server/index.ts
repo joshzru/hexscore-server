@@ -56,6 +56,36 @@ io.on('connect', (socket) => {
         );
     });
 
+    socket.on('hex:createarea', (center, radius) => {
+        radius = Math.abs(Math.round(radius));
+        const added = board.addArea(center, radius);
+
+        for ( const coordinate of added ) {
+            const hex = board.getHex(coordinate);
+            const nodes = hex.vertices.map(nodeId => board.graph.getNode(nodeId));
+
+            const edges: GraphEdge[] = [];
+            const nodeIds = [...hex.vertices, hex.vertices[0]];
+            for ( let i = 0; i < hex.vertices.length; i++ ) {
+                const first = nodeIds[i];
+                const second = nodeIds[i + 1];
+
+                const edge = board.graph.tryGetEdgeBetween(first, second);
+
+                if ( !edge ) continue;
+
+                edges.push(edge);
+            }
+
+            io.emit(
+                'hex:created',
+                hex,
+                nodes,
+                edges,
+            )
+        }
+    })
+
     socket.on('hex:delete', (coordinate) => {
         if ( !board.hasHex(coordinate) ) return;
         const { nodes, edges } = board.deleteHex(coordinate);

@@ -129,6 +129,9 @@ export interface ServerToClientEvents {
  * 
  * 'hex:create': Communicates that a hex should be created at a coordinate.
  * 
+ * 'hex:createarea': Communicates that any non-existance hex in the given 
+ * radius from the given center should be created.
+ * 
  * 'hex:delete': Communicates that a hex should be deleted at a coordinate.
  * 
  * 'hex:setresource': Communicates that a hex's resource should be set at a
@@ -182,6 +185,10 @@ export interface ServerToClientEvents {
  */
 export interface ClientToServerEvents {
     'hex:create': (coordinate: HexCoordinate) => void;
+    'hex:createarea': (
+        center: HexCoordinate,
+        radius: number,
+    ) => void;
     'hex:delete': (coordinate: HexCoordinate) => void;
     'hex:setresource': (
         coordinate: HexCoordinate,

@@ -520,15 +520,16 @@ export class Graph {
         player: Player,
         usedEdges: Set<EdgeId>,
     ): EdgeId[] {
-        const node = this.nodes.get(nodeId);
+        const node = this.getNode(nodeId);
 
-        if ( !node ) {
-            throw new Error(`Node ${nodeId} does not exist.`);
-        }
-
+        // If the node belongs to a different player, and isn't the first node
+        // we've considered, the road is blocked.
         if (
             node.player !== undefined &&
-            node.player !== player
+            ( // The starting node can belong to a different player
+                node.player !== player &&
+                usedEdges.size !== 0
+            )
         ) {
             return [];
         }

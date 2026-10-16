@@ -20,11 +20,6 @@
  * can be created or removed.
  * 
  * Highlighting hexes, edges, and nodes is broken, need to rework.
- * 
- * Bug in finding longest road. When checking if an edge should be visited,
- * edges are not visited if the destination node contains a settlement/city
- * belonging to another player. However, it's only roads originating from a node
- * belonging to another player that should not be visited.
 */
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
@@ -46,7 +41,7 @@ import type {
     ServerToClientEvents,
 } from '../server/socket.js';
 
-type PointerState = 'default' | 'down' | 'dragging';
+type PointerState = 'default' | 'down' | 'dragging' | 'area-select';
 
 type Gesture = {
     evCache: Map<number, PointerEvent>;
@@ -60,6 +55,14 @@ type DragPointer = {
     startPoint?: Point;
     lastPoint?: Point;
     downTargets: Map<number, EventTarget | null>;
+    singleClickTimeout?: number;
+    doubleClickDetected: boolean;
+    lastClick: {
+        time: number;
+        x: number;
+        y: number;
+        target: EventTarget | null;
+    }
 }
 
 type Selection = {
@@ -78,6 +81,8 @@ type DialogType =
     | 'assign-largest-army';
 
 const EPSILON: number = 1e-4;
+const CLICK_DELAY: number = 200;
+const CLICK_DISTANCE: number = 5;
 
 class SelectionDialog {
     dialog: HTMLDialogElement;
@@ -398,13 +403,13 @@ class SelectionDialog {
 
 const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
 
-const hexGrid: Map<HexId, Hex> = new Map();
+const hexMap: Map<HexId, Hex> = new Map();
 const nodeMap: Map<NodeId, GraphNode> = new Map();
 const edgeMap: Map<EdgeId, GraphEdge> = new Map();
 
 const svg = document.querySelector<SVGSVGElement>('svg')!;
 
-const grid = {
+const hexGrid = {
     hexes: document.querySelector<SVGGElement>('#hexes')!,
     edges: document.querySelector<SVGGElement>('#edges')!,
     nodes: document.querySelector<SVGGElement>('#nodes')!,
@@ -443,9 +448,25 @@ cameraElement.setAttribute(
     rotate(${camera.currentRotation * 180 / Math.PI})`,
 )
 
+type AreaSelectData = {
+    center?: HexCoordinate;
+    radius?: number;
+}
+
+const virtualAreaHexes: Set<HexId> = new Set();
+const highlightedArea: Set<HexId> = new Set();
+const areaSelect: AreaSelectData = {};
+
 const pointer: DragPointer = {
     state: 'default',
     downTargets: new Map(),
+    doubleClickDetected: false,
+    lastClick: {
+        time: 0,
+        x: 0,
+        y: 0,
+        target: null,
+    },
 }
 
 const gesture: Gesture = {
@@ -513,28 +534,6 @@ function scheduleCameraAnimation(): void {
         animationFrame = requestAnimationFrame(animateCamera);
     }
 }
-
-/*
- * Pointy-top hex geometry.
- *
- * q/r are axial coordinates:
- *
- *        q+0,r-1     q+1,r-1
- *             \       /
- *              \     /
- *        q-1,r  HEX  q+1,r
- *              /     \
- *             /       \
- *        q-1,r+1     q+0,r+1
- *
- * The six vertices are numbered clockwise:
- *
- *             0 ----- 5
- *            /         \
- *           1           4
- *            \         /
- *             2 ----- 3
- */
 
 const HEX_SIZE = 50;
 
@@ -633,10 +632,6 @@ function createSvgElement<K extends keyof SVGElementTagNameMap>(
     );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Hexes                                                                     */
-/* -------------------------------------------------------------------------- */
-
 function renderHex(hex: Hex): void {
     removeHex(hex.coordinate);
 
@@ -692,22 +687,24 @@ function renderHex(hex: Hex): void {
         group.appendChild(robberElement);
     }
 
-    grid.hexes.appendChild(group);
+    hexGrid.hexes.appendChild(group);
+}
+
+function removeVirtualHex(id: HexId): void {
+    hexGrid.hexes
+        .querySelector<SVGPolygonElement>(
+            `polygon[data-hex-id="${CSS.escape(id)}"]`,
+        )?.remove();
 }
 
 function removeHex(coordinate: HexCoordinate): void {
     const id = hexId(coordinate);
 
-    document
+    hexGrid.hexes
         .querySelector<SVGGElement>(
             `g[data-hex-id="${CSS.escape(id)}"]`,
-        )
-        ?.remove();
+        )?.remove();
 }
-
-/* -------------------------------------------------------------------------- */
-/* Nodes                                                                      */
-/* -------------------------------------------------------------------------- */
 
 function renderNode(node: GraphNode): void {
     const existing = document.querySelector<SVGGElement>(
@@ -809,12 +806,12 @@ function renderNode(node: GraphNode): void {
     }
 
     if ( !existing ) {
-        grid.nodes.appendChild(group);
+        hexGrid.nodes.appendChild(group);
     }
 }
 
 function findHexContainingNode(nodeId: NodeId): Hex | undefined {
-    for ( const hex of hexGrid.values() ) {
+    for ( const hex of hexMap.values() ) {
         if ( hex.vertices.includes(nodeId) ) {
             return hex;
         }
@@ -822,10 +819,6 @@ function findHexContainingNode(nodeId: NodeId): Hex | undefined {
 
     return undefined;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Edges                                                                      */
-/* -------------------------------------------------------------------------- */
 
 function renderEdge(edge: GraphEdge): void {
     const existing = document.querySelector<SVGGElement>(
@@ -873,7 +866,7 @@ function renderEdge(edge: GraphEdge): void {
 
     group.appendChild(element);
 
-    grid.edges.appendChild(group);
+    hexGrid.edges.appendChild(group);
 
     /*
      * Make the road shorter than the actual hex edge.
@@ -909,7 +902,7 @@ function renderEdge(edge: GraphEdge): void {
 }
 
 function findNodePoint(nodeId: NodeId): Point | undefined {
-    for ( const hex of hexGrid.values() ) {
+    for ( const hex of hexMap.values() ) {
         const index = hex.vertices.indexOf(nodeId);
 
         if ( index !== -1 ) {
@@ -920,22 +913,18 @@ function findNodePoint(nodeId: NodeId): Point | undefined {
     return undefined;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Virtual hexes                                                             */
-/* -------------------------------------------------------------------------- */
-
 function getVirtualCoordinates(): HexCoordinate[] {
     const virtualIds = new Set<HexId>();
 
-    if ( hexGrid.size === 0 ) {
+    if ( hexMap.size === 0 ) {
         return [{ q: 0, r: 0 }];
     }
 
-    for ( const hex of hexGrid.values() ) {
+    for ( const hex of hexMap.values() ) {
         for ( const neighbor of getNeighborCoordinates(hex.coordinate) ) {
             const id = hexId(neighbor);
 
-            if ( !hexGrid.has(id) ) {
+            if ( !hexMap.has(id) ) {
                 virtualIds.add(id);
             }
         }
@@ -948,6 +937,23 @@ function getVirtualCoordinates(): HexCoordinate[] {
     });
 }
 
+function renderVirtualHex(coordinate: HexCoordinate, highlight=false): void {
+    const el = createSvgElement('polygon');
+
+    el.dataset.type = 'virtual';
+    el.dataset.hexId = hexId(coordinate);
+
+    el.classList.add('virtual-hex');
+    el.classList.toggle('highlight', highlight);
+
+    el.setAttribute(
+        'points',
+        pointsAttribute(hexVertices(coordinate)),
+    );
+
+    hexGrid.hexes.appendChild(el);
+}
+
 function renderVirtualHexes(): void {
     // Remove old virtual hexes.
     document
@@ -957,45 +963,20 @@ function renderVirtualHexes(): void {
         .forEach(element => element.remove());
 
     for ( const coordinate of getVirtualCoordinates() ) {
-        const element = createSvgElement('polygon');
-
-        element.dataset.type = 'virtual';
-        element.dataset.hexId = hexId(coordinate);
-
-        element.classList.add('hex', 'virtual-hex');
-
-        element.setAttribute(
-            'points',
-            pointsAttribute(hexVertices(coordinate)),
-        );
-
-        grid.hexes.appendChild(element);
+        renderVirtualHex(coordinate);
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Rendering                                                                  */
-/* -------------------------------------------------------------------------- */
-
 function renderAll(): void {
-    /*
-     * SVG paint order matters.
-     *
-     * Put hexes down first, then edges, then nodes, then virtual hexes.
-     *
-     * However, virtual hexes need to be underneath the actual graph objects,
-     * so we render them first.
-     */
-
-    grid.hexes.replaceChildren();
-    grid.edges.replaceChildren();
-    grid.nodes.replaceChildren();
+    hexGrid.hexes.replaceChildren();
+    hexGrid.edges.replaceChildren();
+    hexGrid.nodes.replaceChildren();
 
     // virtual background.
     renderVirtualHexes();
 
     // Real hexes.
-    for ( const hex of hexGrid.values() ) {
+    for ( const hex of hexMap.values() ) {
         renderHex(hex);
     }
 
@@ -1010,17 +991,13 @@ function renderAll(): void {
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Socket events                                                              */
-/* -------------------------------------------------------------------------- */
-
 socket.on('init', (hexes, nodes, edges, scores) => {
-    hexGrid.clear();
+    hexMap.clear();
     nodeMap.clear();
     edgeMap.clear();
 
     for ( const hex of hexes ) {
-        hexGrid.set(
+        hexMap.set(
             hexId(hex.coordinate),
             hex,
         );
@@ -1040,7 +1017,7 @@ socket.on('init', (hexes, nodes, edges, scores) => {
 
 
 socket.on('hex:created', (hex, nodes, edges) => {
-    hexGrid.set(
+    hexMap.set(
         hexId(hex.coordinate),
         hex,
     );
@@ -1060,12 +1037,12 @@ socket.on('hex:created', (hex, nodes, edges) => {
 
 // Send over nodes and edges to delete as well
 socket.on('hex:deleted', (coordinate, nodes, edges) => {
-    if ( !hexGrid.has(hexId(coordinate)) ) {
+    if ( !hexMap.has(hexId(coordinate)) ) {
         socket.emit('recover:state');
         return;
     }
 
-    hexGrid.delete(
+    hexMap.delete(
         hexId(coordinate),
     );
 
@@ -1081,7 +1058,7 @@ socket.on('hex:deleted', (coordinate, nodes, edges) => {
 });
 
 socket.on('hex:setresource', (coordinate, resource) => {
-    const hex = hexGrid.get(hexId(coordinate));
+    const hex = hexMap.get(hexId(coordinate));
 
     if ( !hex ) {
         socket.emit('recover:state');
@@ -1093,7 +1070,7 @@ socket.on('hex:setresource', (coordinate, resource) => {
 });
 
 socket.on('hex:setroll', (coordinate, roll) => {
-    const  hex = hexGrid.get(hexId(coordinate));
+    const  hex = hexMap.get(hexId(coordinate));
 
     if ( !hex ) {
         socket.emit('recover:state');
@@ -1106,8 +1083,8 @@ socket.on('hex:setroll', (coordinate, roll) => {
 
 socket.on('hex:movedrobber', (from, to) => {
     let fromHex: Hex | undefined = undefined;
-    if ( from ) fromHex = hexGrid.get(hexId(from));
-    const toHex = hexGrid.get(hexId(to));
+    if ( from ) fromHex = hexMap.get(hexId(from));
+    const toHex = hexMap.get(hexId(to));
 
     if (
         (!from &&
@@ -1216,29 +1193,29 @@ socket.on('edge:changedplayer', (edgeId, player) => {
 socket.on('dice:resources', (coordinates, edges, resourceArray) => {
     // Highlight each coordinate that produced resources
     for ( const coordinate of coordinates ) {
-        grid.hexes.querySelector(`polygon.hex[data-hex-id="${CSS.escape(hexId(coordinate))}"]`)
+        hexGrid.hexes.querySelector(`polygon.hex[data-hex-id="${CSS.escape(hexId(coordinate))}"]`)
             ?.classList.add('highlight');
     }
 
     // Highlight each edge of each hex.
     for ( const edgeId of edges ) {
-        grid.edges.querySelector(`line.edge[data-edge-id="${CSS.escape(edgeId)}"]`)
+        hexGrid.edges.querySelector(`line.edge[data-edge-id="${CSS.escape(edgeId)}"]`)
             ?.classList.add('highlight');
-        grid.edges.querySelector(`line.edge-outline[data-edge-id="${CSS.escape(edgeId)}"]`)
+        hexGrid.edges.querySelector(`line.edge-outline[data-edge-id="${CSS.escape(edgeId)}"]`)
             ?.classList.add('highlight');
     }
 
     // Remove the highlight after 30 seconds.
     window.setTimeout(() => {
         for ( const coordinate of coordinates ) {
-            grid.hexes.querySelector(`polygon.hex[data-hex-id="${CSS.escape(hexId(coordinate))}"]`)
+            hexGrid.hexes.querySelector(`polygon.hex[data-hex-id="${CSS.escape(hexId(coordinate))}"]`)
                 ?.classList.remove('highlight');
         }
 
         for ( const edgeId of edges ) {
-            grid.edges.querySelector(`line.edge[data-node-id="${CSS.escape(edgeId)}"]`)
+            hexGrid.edges.querySelector(`line.edge[data-node-id="${CSS.escape(edgeId)}"]`)
                 ?.classList.remove('highlight');
-            grid.edges.querySelector(`line.edge-outline[data-node-id="${CSS.escape(edgeId)}"]`)
+            hexGrid.edges.querySelector(`line.edge-outline[data-node-id="${CSS.escape(edgeId)}"]`)
                 ?.classList.remove('highlight');
         }
     }, 30000)
@@ -1263,26 +1240,22 @@ socket.on('score:update', (player, score) => {
 socket.on('edge:highlight', edges => {
     // Highlight each edge.
     for ( const edgeId of edges ) {
-        grid.edges.querySelector(`line.edge[data-edge-id="${CSS.escape(edgeId)}"]`)
+        hexGrid.edges.querySelector(`line.edge[data-edge-id="${CSS.escape(edgeId)}"]`)
             ?.classList.add('highlight');
-        grid.edges.querySelector(`line.edge-outline[data-edge-id="${CSS.escape(edgeId)}"]`)
+        hexGrid.edges.querySelector(`line.edge-outline[data-edge-id="${CSS.escape(edgeId)}"]`)
             ?.classList.add('highlight');
     }
 
     // Remove the highlight after 5 seconds.
     window.setTimeout(() => {
         for ( const edgeId of edges ) {
-            grid.edges.querySelector(`line.edge[data-edge-id="${CSS.escape(edgeId)}"]`)
+            hexGrid.edges.querySelector(`line.edge[data-edge-id="${CSS.escape(edgeId)}"]`)
                 ?.classList.remove('highlight');
-            grid.edges.querySelector(`line.edge-outline[data-edge-id="${CSS.escape(edgeId)}"]`)
+            hexGrid.edges.querySelector(`line.edge-outline[data-edge-id="${CSS.escape(edgeId)}"]`)
                 ?.classList.remove('highlight');
         }
     }, 5000)
 })
-
-/* -------------------------------------------------------------------------- */
-/*  Global Handlers                                                           */
-/* -------------------------------------------------------------------------- */
 
 type CubeCoordinate = {
     q: number;
@@ -1453,6 +1426,11 @@ document.addEventListener('pointerdown', ev => {
     switch ( gesture.evCache.size ) {
         case 1: // 1 pointer exists
             beginDrag(pointer, ev)
+            if ( isDoubleClick(ev) ) {
+                pointer.doubleClickDetected = true;
+                window.clearTimeout(pointer.singleClickTimeout);
+                pointer.singleClickTimeout = undefined;
+            }
             break;
         case 2: // 2 pointers exist
             // Grab both pointers
@@ -1490,8 +1468,18 @@ document.addEventListener('pointermove', ev => {
             const dx = ev.x - pointer.startPoint.x;
             const dy = ev.y - pointer.startPoint.y;
 
-            // If we've moved past the drag threshold
             if (
+                pointer.state === 'down' &&
+                pointer.doubleClickDetected &&
+                Math.hypot(dx, dy) > DRAG_THRESHOLD
+            ) {
+                pointer.state = 'area-select';
+            }
+
+            // If we've moved past the drag threshold and aren't in
+            // 'area-select'
+            if (
+                pointer.state !== 'area-select' &&
                 pointer.state === 'down' &&
                 Math.hypot(dx, dy) > DRAG_THRESHOLD
             ) {
@@ -1509,6 +1497,32 @@ document.addEventListener('pointermove', ev => {
                     x: ev.clientX,
                     y: ev.clientY,
                 };
+            }
+
+            // If we are selecting an area
+            if ( pointer.state === 'area-select' ) {
+                const dx = ev.x - pointer.startPoint.x;
+                const dy = ev.y -pointer.startPoint.y;
+
+                const hexRadius = Math.hypot(dx, dy) / (HEX_SIZE * Math.sqrt(3));
+                const target = pointer.downTargets.get(ev.pointerId);
+                
+                if ( target instanceof SVGElement ) {
+                    const center = target.dataset.hexId;
+                    if (
+                        !center ||
+                        !isCoordinate(center)
+                    ) {
+                        break;
+                    }
+
+                    areaSelect.center = coordinateFromId(center);
+                    areaSelect.radius = Math.abs(Math.round(hexRadius));
+                    updateVirtualArea(
+                        areaSelect.center,
+                        areaSelect.radius,
+                    );
+                }
             }
             break;
         case 2: // pinch/rotate
@@ -1595,30 +1609,57 @@ function handlePointerUp(ev: PointerEvent): void {
     }
 }
 
-function handleClick(ev: PointerEvent): void {
-    // TODO: Create a class for a context menu
-    const target = pointer.downTargets.get(ev.pointerId);
+function recordClick(ev: PointerEvent): void {
+    pointer.lastClick.time = performance.now();
+    pointer.lastClick.x = ev.clientX;
+    pointer.lastClick.y = ev.clientY;
+    pointer.lastClick.target = ev.target;
+}
 
-    if ( !target ) {
+function isDoubleClick(ev: PointerEvent): boolean {
+    const now = performance.now();
+
+    const elapsed = now - pointer.lastClick.time;
+    const dx = ev.clientX - pointer.lastClick.x;
+    const dy = ev.clientY - pointer.lastClick.y;
+
+    return elapsed <= CLICK_DELAY &&
+        elapsed >= 0 &&
+        Math.hypot(dx, dy) <= CLICK_DISTANCE &&
+        ev.target === pointer.lastClick.target;
+}
+
+function scheduleClick(ev: PointerEvent): void {
+    if ( pointer.doubleClickDetected ) {
+        if ( pointer.singleClickTimeout !== undefined ) {
+            window.clearTimeout(pointer.singleClickTimeout);
+            pointer.singleClickTimeout = undefined;
+        }
+
+        handleDoubleClick(ev);
         return;
     }
 
+    const clickTarget = pointer.downTargets.get(ev.pointerId);
+
+    pointer.singleClickTimeout = window.setTimeout(() => {
+        pointer.singleClickTimeout = undefined;
+
+        if ( clickTarget ) {
+            handleSingleClick(clickTarget, ev);
+        }
+    }, CLICK_DELAY);
+}
+
+function handleSingleClick(target: EventTarget, ev: PointerEvent): void {
+    // TODO: Create a class for a context menu
     if ( target instanceof SVGElement ) {
         selection.el = target;
 
         switch ( target.dataset.type ) {
             case 'virtual':
-                if (
-                    !target.dataset.hexId ||
-                    !isCoordinate(target.dataset.hexId)
-                ) {
-                    break;
-                }
-
-                socket.emit(
-                    'hex:create',
-                    coordinateFromId(target.dataset.hexId),
-                );
+                // TODO: Create a context menu for a virtual hex that contains
+                // a 'create' button.
                 break;
             case 'hex':
                 const hexMenu = document.querySelector('#hex-context-menu');
@@ -1727,6 +1768,53 @@ function handleClick(ev: PointerEvent): void {
     }
 }
 
+function handleDoubleClick(ev: PointerEvent): void {
+    const target = pointer.downTargets.get(ev.pointerId);
+
+    if ( target === undefined ) return;
+
+    if ( target instanceof SVGElement ) {
+        switch ( target.dataset.type ) {
+            case 'virtual': // Create hex on double click
+                if (
+                    !target.dataset.hexId ||
+                    !isCoordinate(target.dataset.hexId)
+                ) {
+                    break;
+                }
+
+                socket.emit(
+                    'hex:create',
+                    coordinateFromId(target.dataset.hexId),
+                );
+                break;
+            case 'node': // Downgrade a city/Upgrade a settlement
+                if ( !target.dataset.nodeId ) {
+                    throw new Error(`Node ${target.dataset.nodeId} does not exist`);
+                }
+
+                const node = nodeMap.get(target.dataset.nodeId);
+
+                if ( !node ) break;
+
+                switch ( node.type ) {
+                    case 'city':
+                        socket.emit(
+                            'node:downgrade',
+                            target.dataset.nodeId,
+                        )
+                        break;
+                    case 'settlement':
+                        socket.emit(
+                            'node:upgrade',
+                            target.dataset.nodeId,
+                        )
+                        break;
+                }
+        }
+    }
+}
+
 document.addEventListener('pointerup', ev => {
     handlePointerUp(ev);
 
@@ -1737,10 +1825,30 @@ document.addEventListener('pointerup', ev => {
                 pointer.id === ev.pointerId &&
                 pointer.state === 'down'
             ) { // Treat this as a 'click'
-                handleClick(ev);
+                scheduleClick(ev);
+                recordClick(ev);
             }
+
+            pointer.doubleClickDetected = false;
+
+            // Send area to be created if it exists
+            if (
+                areaSelect.center &&
+                areaSelect.radius
+            ) {
+                socket.emit(
+                    'hex:createarea',
+                    areaSelect.center,
+                    areaSelect.radius,
+                )
+            }
+
+            areaSelect.center = undefined;
+            areaSelect.radius = undefined;
+
             // Invalidate drag pointer after click
             resetDrag(pointer);
+            removeVirtualArea();
             break;
         case 1: // 1 pointer
             // Set this pointer as the current drag pointer
@@ -2077,3 +2185,96 @@ document.querySelector<HTMLButtonElement>('button[data-action="find-longest-road
     ?.addEventListener('click', () => {
         socket.emit('score:findlongestroad');
     });
+
+function removeVirtualArea(): void {
+    for ( const hexId of [...virtualAreaHexes.values()] ) {
+        removeVirtualHex(hexId);
+    }
+
+    
+    for ( const hexId of [...highlightedArea.values()] ) {
+        hexGrid.hexes
+        .querySelector<SVGElement>(
+            `g[data-hex-id="${CSS.escape(hexId)}"]`,
+        )?.classList.toggle('highlight', false);
+    }
+    
+    virtualAreaHexes.clear();
+    highlightedArea.clear();
+}
+
+function updateVirtualArea(
+    center: HexCoordinate,
+    radius: number,
+): void {
+    radius = Math.abs(Math.round(radius));
+
+    const ids: Set<HexId> = new Set();
+    for ( let q = -radius; q <= radius; q++ ) {
+        for ( let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+            const coordinate = addCoordinates(center, { q, r });
+            ids.add(hexId(coordinate));
+        }
+    }
+
+    // Delete each virtual hex that we don't need and remove each virtual hex
+    // we already have, so we don't duplicate it.
+    for ( const hexId of [...virtualAreaHexes.values()] ) {
+        if ( ids.has(hexId) ) {
+            ids.delete(hexId);
+        } else {
+            removeVirtualHex(hexId);
+            virtualAreaHexes.delete(hexId);
+        }
+    }
+
+    // Remove the highlight from each hex we don't need and remove each
+    // highlighted hex we already have.
+    for ( const hexId of [...highlightedArea.values()] ) {
+        if ( ids.has(hexId) ) {
+            ids.delete(hexId);
+        } else {
+            hexGrid.hexes
+                .querySelector<SVGGElement>(
+                    `[data-hex-id="${CSS.escape(hexId)}"]`,
+                )?.classList.toggle('highlight', false);
+            highlightedArea.delete(hexId);
+        }
+    }
+
+    // Check if we have a hex of this type, if not, create it, otherwise,
+    // highlight it.
+    for ( const hexId of ids.values() ) {
+        const virtualCoordinate = coordinateFromId(hexId);
+
+        const el = hexGrid.hexes
+            .querySelector<SVGElement>(
+                `[data-hex-id="${CSS.escape(hexId)}"]`,
+            );
+        
+        if ( el === null ) {
+            virtualAreaHexes.add(hexId);
+            renderVirtualHex(virtualCoordinate, true);
+        } else {
+            highlightedArea.add(hexId);
+            el.classList.toggle('highlight', true);
+        }
+    }
+}
+
+/**
+ * Adds two axial coordinates.
+ * 
+ * @param a Axial coordinate to add to the other.
+ * @param b Axial coordinate to add to the other.
+ * @returns The sum of `a` and `b`.
+ */
+export function addCoordinates(
+    a: HexCoordinate,
+    b: HexCoordinate
+): HexCoordinate {
+    return {
+        q: a.q + b.q,
+        r: a.r + b.r,
+    }
+}

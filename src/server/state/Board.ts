@@ -11,7 +11,8 @@ import {
     HexCoordinate,
     ResourceId,
     getNeighborCoordinates,
-    hexId
+    hexId,
+    addCoordinates
 } from "./Hex.js";
 import { Player } from "./Hex.js";
 
@@ -76,6 +77,26 @@ export class Board {
      * Undefined when the robber has yet to be placed.
      */
     robber?: HexCoordinate;
+
+    addArea(
+        center: HexCoordinate,
+        radius: number,
+    ): HexCoordinate[] {
+        radius = Math.abs(Math.round(radius));
+
+        const coordinates: HexCoordinate[] = [];
+        for ( let q = -radius; q <= radius; q++ ) {
+            for ( let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++ ) {
+                const coordinate = addCoordinates(center, { q, r });
+                if ( !this.hexes.has(hexId(coordinate)) ) {
+                    this.addHex(coordinate);
+                    coordinates.push(coordinate);
+                }
+            }
+        }
+
+        return coordinates;
+    }
 
     /**
      * Retrieves a hex at the specified coordinate, if one exists; otherwise

@@ -252,6 +252,44 @@ svg {
     filter: brightness(1.15);
 }
 
+.game-ui {
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    display: grid;
+    grid-template-rows:
+        auto
+        minmax(0, 1fr)
+        auto
+        auto
+        auto;
+    grid-template-areas:
+        "scoreboard"
+        "."
+        "notifications"
+        "actions"
+        "actions-menu";
+}
+
+.scoreboard {
+    grid-area: scoreboard;
+}
+
+.notifications {
+    grid-area: notifications;
+}
+
+.actions {
+    grid-area: actions;
+
+    display: grid;
+}
+
+.actions-menu {
+    grid-area: actions-menu;
+}
+
 .scorebar-container {
     position: absolute;
     top: 0px;
@@ -577,4 +615,8 @@ select:focus-visible,
 input:focus-visible {
     outline: 2px solid var(--teal);
     outline-offset: 2px;
+}
+
+[hidden] {
+    display: none;
 }
